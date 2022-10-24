@@ -180,12 +180,8 @@ jobs:
              --query 'Reservations[*].Instances[*].PublicIpAddress' \
              --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
              --output text)
-             curl https://kvdb.io/42mV4KeiPmRdBdCu4LhNtH/backend_url -d 'http://${backend_url}:3030' 
-            #  curl -H "Content-Type: text/plain" \
-            #  -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" \
-            #  --request PUT \
-            #  --data "http://${backend_url}:3030" \
-            #  https://api.memstash.io/values/backend_url
+             curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/backend_url -d 'http://${backend_url}:3030' 
+
       - persist_to_workspace:
           root: ~/
           paths:
@@ -194,103 +190,184 @@ jobs:
       - destroy-environment:
           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
+  configure-infrastructure:
+     docker:
+       - image: python:3.7-alpine3.11
+         environment:
+           NODE_ENV: "local"
+           VERSION: "1"
+           ENVIRONMENT: "production"
+           TYPEORM_CONNECTION: $TYPEORM_CONNECTION
+           TYPEORM_HOST: $TYPEORM_HOST
+           TYPEORM_USERNAME: $TYPEORM_USERNAME
+           TYPEORM_PASSWORD: $TYPEORM_PASSWORD
+           TYPEORM_DATABASE: $TYPEORM_DATABASE
+           TYPEORM_PORT: $TYPEORM_PORT
+           TYPEORM_ENTITIES: $TYPEORM_ENTITIES
+     steps:
+       - checkout
+       # Add ssh keys with fingerprint
+       - add_ssh_keys:
+           fingerprints: ["72:d8:1c:56:e9:79:42:77:72:92:df:3e:6b:b4:c1:da"]
+       - attach_workspace:
+           at: ~/
+       - run:
+           name: Install dependencies
+           command: |
+             apk add curl
+             apk add --upgrade bash
+             apk add --update ansible
+             apk add openssh-client
+             pip3 install awscli
+       - run:
+           name: Configure server
+           command: |
+             cat ~/project/.circleci/ansible/inventory.txt
+             export ANSIBLE_HOST_KEY_CHECKING=False
+             ansible-playbook -i ~/project/.circleci/ansible/inventory.txt ~/project/.circleci/ansible/configure-server.yml
+       # Here's where you will add some code to rollback on failure
+       - destroy-environment:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
-#   configure-infrastructure:
-#     docker:
-#       # Docker image here that supports Ansible
-#     steps:
-#       # Checkout code from git
-#       # Add ssh keys with fingerprint
-#       # attach workspace
-#       - run:
-#           name: Install dependencies
-#           command: |
-#             # Your code here
-#             exit 1
-#       - run:
-#           name: Configure server
-#           command: |
-#             # Your code here
-#             exit 1
-#       # Here's where you will add some code to rollback on failure      
+  run-migrations:
+     docker:
+       - image: sleavely/node-awscli:14.x
+     steps:
+       - checkout
+       - run:
+           name: Run migrations
+           command: |
+             cd backend
+             cat .env
+             npm i
+             npm run build
+             npm run migrations
+       - run:
+           name: Send migration results to memstash
+           command: |
+             echo "has been done successfully" > ./migration_status.txt
+             pwd && ls -al
+             if grep -q "has been done successfully" ./migration_status.txt 
+             then 
+               echo "has been done successfully"
+               curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/migrations-${CIRCLE_WORKFLOW_ID:0:7} -d "1"
+              # curl -H "Content-Type: text/plain" -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" --request PUT --data "1" https://api.memstash.io/values/migrations-${CIRCLE_WORKFLOW_ID:0:7}
+             else
+               echo "has failed"
+               curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/migrations-${CIRCLE_WORKFLOW_ID:0:7} -d "0"
+              # curl -H "Content-Type: text/plain" -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" --request PUT --data "0" https://api.memstash.io/values/migrations-${CIRCLE_WORKFLOW_ID:0:7}
+             fi
+        #Here's where you will add some code to rollback on failure
+       - destroy-environment:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
-#   run-migrations:
-#     docker:
-#       # Docker image here that supports NodeJS
-#     steps:
-#       # Checkout code from git
-#       - run:
-#           name: Run migrations
-#           command: |
-#             # Your code here
-#             exit 1
-#       - run:
-#           name: Send migration results to memstash
-#           command: |
-#             # Your code here
-#             exit 1
-#      # Here's where you will add some code to rollback on failure      
+  deploy-frontend:
+     docker:
+       - image: sleavely/node-awscli:14.x
+     steps:
+       - checkout
+       - attach_workspace:
+           at: /root
 
-#   deploy-frontend:
-#     docker:
-#       # Docker image here that supports AWS CLI
-#     steps:
-#       # Checkout code from git
-#       - run:
-#           name: Install dependencies
-#           command: |
-#             # your code here
-#       - run:
-#           name: Get backend url
-#           command: |
-#             # your code here
-#             export API_URL="http://${BACKEND_IP}:3030"
-#             echo "${API_URL}"
-#       - run:
-#           name: Deploy frontend objects
-#           command: |
-#             # your code here
-#       # Here's where you will add some code to rollback on failure      
-#                     
-#   deploy-backend:
-#     docker:
-#       # Docker image here that supports Ansible
-#     steps:
-#       # Checkout code from git
-#       # Add ssh keys with fingerprint
-#       # attach workspace
-#       - run:
-#           name: Install dependencies
-#           command: |
-#             # your code here
-#       - run:
-#           name: Deploy backend
-#           command: |
-#             # your code here
-#       # Here's where you will add some code to rollback on failure  
+       - run:
+           name: Get backend url
+           command: |
+             API_URL=$(curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/backend_url --request GET)
+             echo $API_URL
+             echo "${API_URL}"
+             echo "NODE_ENV=production" >> frontend/.env
+             echo "API_URL=${API_URL}" >> frontend/.env
+             cat frontend/.env
+            #    curl -H "Content-Type: text/plain" \
+            #  -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" \
+            #  --request GET \
+            #  https://api.memstash.io/values/backend_url)
+       - run:
+           name: Deploy frontend objects
+           working_directory: ./frontend
+           command: |
+             npm i
+             npm run build
+             ls -l
+             aws s3 cp ./dist "s3://udapeople-${CIRCLE_WORKFLOW_ID:0:7}" --recursive
+       # Here's where you will add some code to rollback on failure
+       - destroy-environment:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
-#   smoke-test:
-#     docker:
-#       # Lightweight Docker image 
-#     steps:
-#       # Checkout code from git
-#       - run:
-#           name: Install dependencies
-#           command: |
-#             # your code here
-#       - run:
-#           name: Get backend url
-#           command: |
-#             # your code here
-#       - run:
-#           name: Backend smoke test.
-#           command: |
-#             # your code here
-#       - run:
-#           name: Frontend smoke test.
-#           command: |
-#             # your code here
-#       # Here's where you will add some code to rollback on failure  
+  deploy-backend:
+     docker:
+       - image: python:3.7-alpine3.11
+         environment:
+           NODE_ENV: "local"
+           VERSION: "1"
+           ENVIRONMENT: "production"
+           TYPEORM_CONNECTION: $TYPEORM_CONNECTION
+           TYPEORM_HOST: $TYPEORM_HOST
+           TYPEORM_USERNAME: $TYPEORM_USERNAME
+           TYPEORM_PASSWORD: $TYPEORM_PASSWORD
+           TYPEORM_DATABASE: $TYPEORM_DATABASE
+           TYPEORM_PORT: $TYPEORM_PORT
+           TYPEORM_ENTITIES: $TYPEORM_ENTITIES
+     steps:
+       - checkout
+       - add_ssh_keys:
+           fingerprints: ["72:d8:1c:56:e9:79:42:77:72:92:df:3e:6b:b4:c1:da"]
+       - attach_workspace:
+           at: /root
+       - run:
+           name: Install dependencies
+           command: |
+             apk add --update ansible rsync 
+             apk add curl
+             pip3 install awscli
+       - run:
+           name: Deploy backend
+           command: |
+             ls /root
+             ls /root/project/backend/
+             cat ~/project/.circleci/ansible/inventory.txt
+             ansible-playbook -i ~/project/.circleci/ansible/inventory.txt ~/project/.circleci/ansible/deploy-backend.yml
+      #  Here's where you will add some code to rollback on failure
+       - destroy-environment:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+
+  smoke-test:
+      docker:
+        - image: python:3.7-alpine3.11
+      steps:
+        - checkout
+        - attach_workspace:
+            at: /root
+        - run:
+            name: Install dependencies
+            command: |
+              apk add --update curl
+              pip install awscli
+        - run:
+            name: Backend smoke test
+            command: |
+              ls 
+              pwd
+              export backend_url=$(curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/backend_url --request GET)
+              echo "${backend_url}"
+              curl "${backend_url}/api/status"
+             #    curl -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" \
+             #  --request GET https://api.memstash.io/values/backend_url)
+        - run:
+            name: Frontend smoke test.
+            command: |
+              URL="http://udapeople-${CIRCLE_WORKFLOW_ID:0:7}.s3-website-us-east-1.amazonaws.com"
+              if curl -s ${URL} | grep "Welcome"
+              then
+                return 0
+              else
+                return 1
+              fi
+        - destroy-environment:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+        - revert-migrations:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+
 
 #   cloudfront-update:
 #     docker:
@@ -345,16 +422,16 @@ workflows:
           filters:
             branches:
               only: [main]
-      # - configure-infrastructure:
-      #     requires: [deploy-infrastructure]
-      # - run-migrations:
-      #     requires: [configure-infrastructure]
-      # - deploy-frontend:
-      #     requires: [run-migrations]
-      # - deploy-backend:
-      #     requires: [run-migrations]
-      # - smoke-test:
-      #     requires: [deploy-backend, deploy-frontend]
+      - configure-infrastructure:
+          requires: [deploy-infrastructure]
+      - run-migrations:
+          requires: [configure-infrastructure]
+      - deploy-frontend:
+          requires: [run-migrations]
+      - deploy-backend:
+          requires: [run-migrations]
+      - smoke-test:
+          requires: [deploy-backend, deploy-frontend]
       # - cloudfront-update:
       #     requires: [smoke-test]
       # - cleanup:
