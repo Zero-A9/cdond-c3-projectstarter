@@ -351,9 +351,17 @@ jobs:
             command: |
               ls 
               pwd
-              export backend_url=$(curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/backend_url --request GET)
+
+              #export backend_url=$(curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/backend_url --request GET)
+
+              backend_url=$(aws ec2 describe-instances \
+              --query 'Reservations[*].Instances[*].PublicIpAddress' \
+              --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --output text)
+
               echo "${backend_url}"
               curl "${backend_url}/api/status"
+
              #    curl -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" \
              #  --request GET https://api.memstash.io/values/backend_url)
         - run:
@@ -371,41 +379,58 @@ jobs:
         - revert-migrations:
            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
+  cloudfront-update:
+     docker:
+       - image: amazon/aws-cli
+     steps:
+       - checkout
+       - run:
+           name: get old workflow for clean
+           command: |
+             WorkflowID=$(aws cloudformation \
+             list-exports --query "Exports[?Name==\`WorkflowID\`].Value" \
+             --no-paginate --output text)
+             curl https://kvdb.io/42mV4KeiPmRdBdCu4LhNtH/workflowid -d '$WorkflowID'
+            #  curl -H "Content-Type: text/plain" -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" --request PUT --data "$WorkflowID" https://api.memstash.io/values/workflowid
+       - run:
+           name: Update cloudfront distribution
+           command: |
+             aws cloudformation deploy \
+               --template-file .circleci/files/cloudfront.yml \
+               --tags project=circleci-${CIRCLE_WORKFLOW_ID:0:7} \
+               --stack-name "InitialStack" \
+               --tags project=udapeople\
+               --parameter-overrides WorkflowID="${CIRCLE_WORKFLOW_ID:0:7}"
+      #  Here's where you will add some code to rollback on failure
+       - revert-migrations:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+       - destroy-environment:
+           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
-#   cloudfront-update:
-#     docker:
-#       # Docker image here that supports AWS CLI
-#     steps:
-#       # Checkout code from git
-#       - run:
-#           name: Install dependencies
-#           command: |
-#             # your code here
-#       - run:
-#           name: Update cloudfront distribution
-#           command: |
-#             # your code here
-#       # Here's where you will add some code to rollback on failure  
+  cleanup:
+      docker:
+        - image: amazon/aws-cli
+      steps:
+        - checkout
+        - run:
+            name: Remove old stacks and files
+            command: |
+              OldWorkflowID=$(curl https://kvdb.io/42mV4KeiPmRdBdCu4LhNtH/workflowid -d '1')
+               #  curl -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" --request GET https://api.memstash.io/values/workflowid)
+              CurrentWorkflowID=${CIRCLE_WORKFLOW_ID:0:7}
+              if [[ $OldWorkflowID == "" ]]
+              then
+              echo "No workflow id found"
+              else
+              if [[ "$CurrentWorkflowID" != "$OldWorkflowID" ]]
+              then
+                echo "$OldWorkflowID!=$CurrentWorkflowID => will delete old version"
+                aws s3 rm "s3://udapeople-${OldWorkflowID}" --recursive
+                aws cloudformation delete-stack --stack-name "udapeople-frontend-${OldWorkflowID}"
+                aws cloudformation delete-stack --stack-name "udapeople-backend-${OldWorkflowID}"
+              fi
+              fi
 
-# cleanup:
-#     docker:
-#       # Docker image here
-#     steps:
-#       # Checkout code from git
-#       - run:
-#           name: Get old stack workflow id
-#           command: |
-#             # your code here
-#             export OldWorkflowID="the id here"
-#             export STACKS=[] #put the list of stacks here
-#       - run:
-#           name: Remove old stacks and files
-#           command: |
-#             if [[ "${STACKS[@]}" =~ "${OldWorkflowID}" ]]
-#             then
-#               # your code here
-#             fi
-            
 
 workflows:
   default:
@@ -435,7 +460,7 @@ workflows:
           requires: [run-migrations]
       - smoke-test:
           requires: [deploy-backend, deploy-frontend]
-      # - cloudfront-update:
-      #     requires: [smoke-test]
-      # - cleanup:
-      #     requires: [cloudfront-update]
+      - cloudfront-update:
+          requires: [smoke-test]
+      - cleanup:
+          requires: [cloudfront-update]
