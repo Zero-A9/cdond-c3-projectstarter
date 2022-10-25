@@ -360,7 +360,7 @@ jobs:
               --output text)
 
               echo "${backend_url}"
-              curl "${backend_url}/api/status:3030"
+              curl "${backend_url}:3030/api/status"
 
              #    curl -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" \
              #  --request GET https://api.memstash.io/values/backend_url)
