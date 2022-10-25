@@ -300,6 +300,7 @@ jobs:
   deploy-backend:
      docker:
        - image: python:3.7-alpine3.11
+       - image: circleci/node:13.8.0
          environment:
            NODE_ENV: "local"
            VERSION: "1"
@@ -323,6 +324,12 @@ jobs:
              apk add --update ansible rsync 
              apk add curl
              pip3 install awscli
+       - run:
+           name: Install Dependencies
+           command: |
+             cd backend
+             npm install
+             npm run build
        # - run:
        #     name: Deploy backend
        #     command: |
