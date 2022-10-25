@@ -1,7 +1,15 @@
 Public Url to GitHub repository
 
+https://github.com/Zero-A9/cdond-c3-projectstarter
 
 Public URL for S3 Bucket
 
+http://udapeople-2034a5b.s3-website-us-east-1.amazonaws.com
 
+Public URL for your CloudFront distribution (aka, your blue production front-end) [URL03]
 
+d3vkw12n3hv11x.cloudfront.net
+
+Public URLs to deployed application back-end in EC2 [URL04]
+
+http://34.201.126.165:3030/api/status
