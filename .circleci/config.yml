@@ -358,14 +358,10 @@ jobs:
               --query 'Reservations[*].Instances[*].PublicIpAddress' \
               --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --output text)
-
+              echo $backend_url
               export API_URL=http://${backend_url}:3030
-              if curl -s $API_URL/api/status | grep "ok"
-              then
-                exit 0
-              else
-                exit 1
-              fi
+              echo $API_URL
+              curl -s $API_URL/api/status | grep "ok"
 
              #    curl -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" \
              #  --request GET https://api.memstash.io/values/backend_url)
