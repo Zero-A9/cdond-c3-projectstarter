@@ -29,9 +29,6 @@ commands:
           # Add when this will run
           when: on_fail
           command: |
-            # Curl command here to see if there was a successful migration associated with the workflow id, store result in SUCCESS variable
-            # SUCCESS=$(curl -H "token: ecdfc255-81e1-4056-9efa-2d7fa10812e1" \
-            # --request GET https://api.memstash.io/values/DB_MIGRATION_<< parameters.workflow_id >>)
             SUCCESS=$(curl --insecure https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/migration_<< parameters.workflow_id >>)
             if(( $SUCCESS==1 )); 
             then
