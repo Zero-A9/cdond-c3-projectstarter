@@ -214,7 +214,7 @@ jobs:
        - add_ssh_keys:
            fingerprints: ["72:d8:1c:56:e9:79:42:77:72:92:df:3e:6b:b4:c1:da"]
        - attach_workspace:
-           at: /root
+           at: ~/
        - run:
            name: Install dependencies
            command: |
@@ -265,18 +265,62 @@ jobs:
        - destroy-environment:
            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
+  deploy-backend:
+      docker:
+        - image: python:3.7-alpine3.11
+          environment:
+            NODE_ENV: "local"
+            VERSION: "1"
+            ENVIRONMENT: "production"
+            TYPEORM_CONNECTION: $TYPEORM_CONNECTION
+            TYPEORM_HOST: $TYPEORM_HOST
+            TYPEORM_USERNAME: $TYPEORM_USERNAME
+            TYPEORM_PASSWORD: $TYPEORM_PASSWORD
+            TYPEORM_DATABASE: $TYPEORM_DATABASE
+            TYPEORM_PORT: $TYPEORM_PORT
+            TYPEORM_ENTITIES: $TYPEORM_ENTITIES
+      steps:
+        - checkout
+        - add_ssh_keys:
+            fingerprints: ["72:d8:1c:56:e9:79:42:77:72:92:df:3e:6b:b4:c1:da"]
+        - attach_workspace:
+            at: ~/
+        - run:
+            name: Install dependencies
+            command: |
+              apk add --update tar gzip ansible nodejs npm curl openssh-client
+              pip3 install awscli
+        - run:
+            name: Deploy backend
+            command: |
+              cd ..
+              npm i
+              npm run build
+              tar -C backend -czvf backend_artifact.tar.gz .
+              cat ~/project/.circleci/ansible/inventory.txt
+              export ANSIBLE_HOST_KEY_CHECKING=False
+              ansible-playbook -i ~/project/.circleci/ansible/inventory.txt ~/project/.circleci/ansible/deploy-backend.yml
+       #  Here's where you will add some code to rollback on failure
+        - destroy-environment:
+            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
+
+
   deploy-frontend:
      docker:
        - image: sleavely/node-awscli:14.x
      steps:
        - checkout
        - attach_workspace:
-           at: /root
+           at: ~/
 
        - run:
            name: Get backend url
            command: |
-             API_URL=$(curl https://kvdb.io/LdPTtzcGoYg7iZfABBwRt1/backend_url --request GET)
+             BACKEND_IP=$(aws ec2 describe-instances \
+              --query 'Reservations[*].Instances[*].PublicIpAddress' \
+              --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --output text)
+             export API_URL="http://${BACKEND_IP}:3030"
              echo $API_URL
              echo "${API_URL}"
              echo "NODE_ENV=production" >> frontend/.env
@@ -299,52 +343,13 @@ jobs:
            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
 
 
-  deploy-backend:
-      docker:
-        - image: python:3.7-alpine3.11
-          environment:
-            NODE_ENV: "local"
-            VERSION: "1"
-            ENVIRONMENT: "production"
-            TYPEORM_CONNECTION: $TYPEORM_CONNECTION
-            TYPEORM_HOST: $TYPEORM_HOST
-            TYPEORM_USERNAME: $TYPEORM_USERNAME
-            TYPEORM_PASSWORD: $TYPEORM_PASSWORD
-            TYPEORM_DATABASE: $TYPEORM_DATABASE
-            TYPEORM_PORT: $TYPEORM_PORT
-            TYPEORM_ENTITIES: $TYPEORM_ENTITIES
-      steps:
-        - checkout
-        - add_ssh_keys:
-            fingerprints: ["72:d8:1c:56:e9:79:42:77:72:92:df:3e:6b:b4:c1:da"]
-        - attach_workspace:
-            at: /root
-        - run:
-            name: Install dependencies
-            command: |
-              apk add --update tar gzip ansible nodejs npm curl openssh-client
-              pip3 install awscli
-        - run:
-            name: Deploy backend
-            command: |
-              cd ..
-              npm i
-              npm run build
-              tar -C backend -czvf backend_artifact.tar.gz .
-              cat ~/project/.circleci/ansible/inventory.txt
-              export ANSIBLE_HOST_KEY_CHECKING=False
-              ansible-playbook -i ~/project/.circleci/ansible/inventory.txt ~/project/.circleci/ansible/deploy-backend.yml
-       #  Here's where you will add some code to rollback on failure
-        - destroy-environment:
-            workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
-
   smoke-test:
       docker:
         - image: python:3.7-alpine3.11
       steps:
         - checkout
         - attach_workspace:
-            at: /root
+            at: ~/
         - run:
             name: Install dependencies
             command: |
@@ -457,9 +462,9 @@ workflows:
           requires: [deploy-infrastructure]
       - run-migrations:
           requires: [configure-infrastructure]
-      - deploy-frontend:
-          requires: [run-migrations]
       - deploy-backend:
+          requires: [run-migrations]
+      - deploy-frontend:
           requires: [run-migrations]
       - smoke-test:
           requires: [deploy-backend, deploy-frontend]
