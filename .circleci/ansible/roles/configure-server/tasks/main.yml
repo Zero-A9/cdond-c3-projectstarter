@@ -6,12 +6,12 @@
     update_cache: yes
 
 - name: "upgrade apt packages"
-  become: yes
+  become: true
   apt:
     upgrade: "yes"
 
 - name: "install dependencies."
-  become: yes
+  become: true
   apt:
     name: ["nodejs", "npm"]
     state: latest
@@ -29,7 +29,7 @@
   shell: n 12.20.1
 
 - name: "install pm2"
-  become: yes
+  become: true
   npm:
     name: pm2
     global: yes
