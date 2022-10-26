@@ -71,7 +71,6 @@ jobs:
           command: |
             npm i
             npm run build
-            mkdir dist
             cp .env dist/.env
             pwd && ls -al
       - persist_to_workspace:
